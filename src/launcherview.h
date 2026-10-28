@@ -11,7 +11,7 @@ class QTimer;
 
 // The launcher on one monitor: a vertical bar on the left edge, as in Ubuntu Unity.
 //
-//   [◎]   ← applications menu (Dash later)
+//   [◎]   ← the Dash (qutaq-dash), or a simple applications menu without it
 //   [▣]   ← pinned and running applications; ▸ on the left = open windows,
 //   [▣]     ◂ on the right = the active application
 //   …
@@ -35,6 +35,7 @@ public:
     static QStringList topPanelServices(); // D-Bus names that mean "a top panel is running"
 
     static int barWidth();
+    static void setDashVisible(bool visible); // qutaq-dash is open: the top button stays highlighted
     QPoint slotCenter(int slot) const; // -1 = Dash button, -2 = trash, 1000+i = device i, otherwise an item (for tests)
 
 protected:
@@ -89,4 +90,5 @@ private:
     QTimer *m_pulse;     // animation of launching applications
     QList<qint64> m_remaps; // times of recent re-creations, to never loop
     bool m_placementBlocked = false;
+    static bool s_dashVisible;
 };

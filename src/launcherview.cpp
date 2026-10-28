@@ -12,6 +12,8 @@
 
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
+#include <QDBusMessage>
+#include <QStandardPaths>
 #include <QGuiApplication>
 #include <QHelpEvent>
 #include <QLocale>
@@ -27,6 +29,13 @@
 #include <QToolTip>
 #include <QWindow>
 #include <QtMath>
+
+bool LauncherView::s_dashVisible = false;
+
+void LauncherView::setDashVisible(bool visible)
+{
+    s_dashVisible = visible;
+}
 
 int LauncherView::barWidth()
 {
@@ -342,7 +351,7 @@ void LauncherView::paintEvent(QPaintEvent *)
     // Dash button: the theme's "start-here" (often the distribution logo) or a drawn one
     static const QIcon themed = QIcon::fromTheme(launcherSetting(QStringLiteral("launcher/dashIcon"), QStringLiteral("start-here")).toString());
     const QIcon dashIcon = themed.isNull() ? dashButtonIcon() : themed;
-    const bool menuOpen = m_appMenu->isVisible();
+    const bool menuOpen = m_appMenu->isVisible() || s_dashVisible;
     drawTile(p, tileRect(DashSlot, 0), dashIcon, QColor(0x3a, 0x3b, 0x44), m_hover.kind == DashSlot || menuOpen, 1.0);
 
     const QList<LauncherItem> &items = m_model->items();
@@ -554,6 +563,22 @@ void LauncherView::toggleAppMenu()
         QStringList args = QProcess::splitCommand(cmd);
         QProcess::startDetached(args.takeFirst(), args);
         return;
+    }
+    // qutaq-dash: running (a call over D-Bus is instant) or installed (start it);
+    // launcher/dash=menu keeps the simple menu instead
+    if (launcherSetting(QStringLiteral("launcher/dash"), QStringLiteral("auto")).toString() != QLatin1String("menu")) {
+        QDBusConnection bus = QDBusConnection::sessionBus();
+        if (bus.interface()->isServiceRegistered(QStringLiteral("org.qutaq.Dash"))) {
+            QDBusMessage msg = QDBusMessage::createMethodCall(QStringLiteral("org.qutaq.Dash"), QStringLiteral("/Dash"),
+                                                              QStringLiteral("org.qutaq.Dash"), QStringLiteral("ToggleOn"));
+            msg << m_screen->name();
+            bus.call(msg, QDBus::NoBlock);
+            return;
+        }
+        if (!QStandardPaths::findExecutable(QStringLiteral("qutaq-dash")).isEmpty()) {
+            QProcess::startDetached(QStringLiteral("qutaq-dash"), {QStringLiteral("--toggle"), QStringLiteral("--screen"), m_screen->name()});
+            return;
+        }
     }
     connect(m_appMenu, &QMenu::aboutToHide, this, qOverload<>(&QWidget::update), Qt::UniqueConnection);
     popupMenu(m_appMenu, tileRect(DashSlot, 0));

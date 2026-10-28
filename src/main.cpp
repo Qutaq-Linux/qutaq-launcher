@@ -52,6 +52,25 @@ private:
     QHash<QScreen *, LauncherView *> *m_views;
 };
 
+// Highlights the top button while qutaq-dash is open
+class LauncherDashListener : public QObject
+{
+    Q_OBJECT
+public:
+    LauncherDashListener(QHash<QScreen *, LauncherView *> *views, QObject *parent) : QObject(parent), m_views(views) {}
+
+public Q_SLOTS:
+    void changed(bool visible)
+    {
+        LauncherView::setDashVisible(visible);
+        for (LauncherView *v : std::as_const(*m_views))
+            v->update();
+    }
+
+private:
+    QHash<QScreen *, LauncherView *> *m_views;
+};
+
 // qutaq-launcher --toggle-menu: for a keybind in labwc's rc.xml (e.g. the Super key)
 static int remoteCommand(int argc, char *argv[], const char *method)
 {
@@ -162,6 +181,11 @@ int main(int argc, char *argv[])
         for (LauncherView *v : std::as_const(views))
             v->checkPlacementSoon();
     });
+
+    // qutaq-dash tells when it opens and closes: the top button is highlighted meanwhile
+    auto *dashListener = new LauncherDashListener(&views, &app);
+    bus.connect(QStringLiteral("org.qutaq.Dash"), QStringLiteral("/Dash"), QStringLiteral("org.qutaq.Dash"),
+                QStringLiteral("VisibilityChanged"), dashListener, SLOT(changed(bool)));
 
     return app.exec();
 }
