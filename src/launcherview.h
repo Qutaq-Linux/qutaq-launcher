@@ -6,6 +6,7 @@ class LauncherModel;
 class Trash;
 class Devices;
 class AppMenu;
+class WorkspaceManager;
 class QScreen;
 class QTimer;
 
@@ -16,6 +17,7 @@ class QTimer;
 //   [▣]     ◂ on the right = the active application
 //   …
 //   [💾]   ← drives and media (USB sticks, cards, discs, other partitions); ▸ = mounted
+//   [▦]   ← workspace switcher: click a workspace, or scroll (launcher/workspaces)
 //   [🗑]   ← trash, always at the bottom
 //
 // Left click: start / switch to / cycle windows / minimize. Middle click: new instance.
@@ -24,7 +26,8 @@ class LauncherView : public QWidget
 {
     Q_OBJECT
 public:
-    LauncherView(LauncherModel *model, Devices *devices, Trash *trash, AppMenu *appMenu, QScreen *screen);
+    LauncherView(LauncherModel *model, Devices *devices, Trash *trash, AppMenu *appMenu, WorkspaceManager *workspaces,
+                 QScreen *screen);
     void setupLayerShell();
     void remap(); // re-create the layer surface (to get placed below the top panel)
     // Checks a little later whether the launcher took the full height while qutaq-panel runs
@@ -36,7 +39,10 @@ public:
 
     static int barWidth();
     static void setDashVisible(bool visible); // qutaq-dash is open: the top button stays highlighted
-    QPoint slotCenter(int slot) const; // -1 = Dash button, -2 = trash, 1000+i = device i, otherwise an item (for tests)
+    QPoint slotCenter(int slot) const; // -1 = Dash button, -2 = trash, -3 = workspaces, 1000+i = device i, otherwise an item (for tests)
+    QPoint workspaceCellCenter(int index) const; // for tests
+    bool workspaceSwitcherShown() const;         // launcher/workspaces=auto|yes|no
+    WorkspaceManager *workspaceManager() const { return m_workspaces; }
 
 protected:
     void paintEvent(QPaintEvent *) override;
@@ -50,10 +56,10 @@ protected:
     bool event(QEvent *e) override;
 
 private:
-    enum SlotKind { None, DashSlot, ItemSlot, DeviceSlot, TrashSlot };
+    enum SlotKind { None, DashSlot, ItemSlot, DeviceSlot, WorkspaceSlot, TrashSlot };
     struct Hit {
         SlotKind kind = None;
-        int index = -1; // item index for ItemSlot, device index for DeviceSlot
+        int index = -1; // item index for ItemSlot, device index for DeviceSlot, workspace for WorkspaceSlot
     };
 
     int tileSize() const;          // shrinks when there are too many icons, down to launcher/minIconSize
@@ -68,6 +74,9 @@ private:
     void showQuicklist(int index);
     void showTrashMenu();
     void showDeviceMenu(int index);
+    void showWorkspaceMenu();
+    QList<QRect> workspaceCells(const QRect &tile) const; // empty if there are too many to draw
+    void drawWorkspaces(QPainter &p, const QRect &tile);
     int deviceCount() const;
     void popupMenu(QMenu *menu, const QRect &tile);
     void drawTile(QPainter &p, const QRect &r, const QIcon &icon, const QColor &color, bool hover, double opacity);
@@ -79,6 +88,8 @@ private:
     Devices *m_devices;
     Trash *m_trash;
     AppMenu *m_appMenu;
+    WorkspaceManager *m_workspaces;
+    int m_wheelWorkspace = 0; // accumulated wheel delta over the switcher (touchpads send small steps)
     QScreen *m_screen;
     Hit m_hover;
     Hit m_pressed;

@@ -24,6 +24,7 @@ qt_add_executable(qutaq-launcher
     src/trash.h             src/trash.cpp
     src/devices.h           src/devices.cpp
     src/toplevelmanager.h   src/toplevelmanager.cpp
+    src/workspaces.h        src/workspaces.cpp
     src/icons.h             src/icons.cpp
     src/settings.h
 )
@@ -31,6 +32,7 @@ qt_add_executable(qutaq-launcher
 # Generates qwayland-*.h / wayland-*-client-protocol.h from the protocol XML
 qt6_generate_wayland_protocol_client_sources(qutaq-launcher
     FILES ${CMAKE_CURRENT_SOURCE_DIR}/protocols/wlr-foreign-toplevel-management-unstable-v1.xml
+          ${CMAKE_CURRENT_SOURCE_DIR}/protocols/ext-workspace-v1.xml
 )
 
 # translations/qutaq-launcher_<lang>.ts → .qm files built into the program (:/i18n).

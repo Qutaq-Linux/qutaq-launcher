@@ -141,6 +141,10 @@
         <source>Safely Remove</source>
         <translation>Sicher entfernen</translation>
     </message>
+    <message>
+        <source>Workspace Switcher</source>
+        <translation>Arbeitsflächen-Umschalter</translation>
+    </message>
 </context>
 <context>
     <name>Trash</name>

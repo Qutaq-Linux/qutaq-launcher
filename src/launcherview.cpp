@@ -7,6 +7,7 @@
 #include "launchermodel.h"
 #include "settings.h"
 #include "trash.h"
+#include "workspaces.h"
 
 #include <LayerShellQt/Window>
 
@@ -43,11 +44,13 @@ int LauncherView::barWidth()
     return tile + 16;
 }
 
-LauncherView::LauncherView(LauncherModel *model, Devices *devices, Trash *trash, AppMenu *appMenu, QScreen *screen)
+LauncherView::LauncherView(LauncherModel *model, Devices *devices, Trash *trash, AppMenu *appMenu,
+                           WorkspaceManager *workspaces, QScreen *screen)
     : m_model(model)
     , m_devices(devices)
     , m_trash(trash)
     , m_appMenu(appMenu)
+    , m_workspaces(workspaces)
     , m_screen(screen)
     , m_pulse(new QTimer(this))
 {
@@ -56,6 +59,12 @@ LauncherView::LauncherView(LauncherModel *model, Devices *devices, Trash *trash,
     setMouseTracking(true);
     setFixedWidth(barWidth());
     resize(barWidth(), screen->geometry().height());
+
+    // Workspaces added, removed, renamed or switched: the switcher may appear or disappear too
+    connect(workspaces, &WorkspaceManager::changed, this, [this] {
+        scrollBy(0);
+        update();
+    });
 
     connect(model, &LauncherModel::changed, this, [this] {
         bool launching = false;
@@ -192,7 +201,8 @@ int LauncherView::tileSize() const
     // whatever still doesn't fit scrolls.
     const int wanted = barWidth() - 16;
     const int minimum = qBound(16, launcherSetting(QStringLiteral("launcher/minIconSize"), 32).toInt(), wanted);
-    const int slotCount = m_model->items().size() + deviceCount() + 2; // + Dash button and trash
+    const int slotCount = m_model->items().size() + deviceCount() + 2 // + Dash button and trash
+                          + (workspaceSwitcherShown() ? 1 : 0);
     const int fit = (height() - 2 * kPadding) / qMax(1, slotCount) - kSpacing;
     return qBound(minimum, fit, wanted);
 }
@@ -200,7 +210,8 @@ int LauncherView::tileSize() const
 QRect LauncherView::itemsArea() const
 {
     const int top = kPadding + slotHeight() - kSpacing / 2;
-    const int bottom = height() - kPadding - tileSize() - kSpacing / 2;
+    const int fixedBelow = workspaceSwitcherShown() ? 2 : 1; // trash, and the switcher above it
+    const int bottom = height() - kPadding - fixedBelow * slotHeight() + kSpacing / 2;
     return QRect(0, top, width(), qMax(0, bottom - top));
 }
 
@@ -226,6 +237,17 @@ void LauncherView::scrollBy(int dy)
 void LauncherView::wheelEvent(QWheelEvent *e)
 {
     const QPoint d = e->angleDelta();
+    if (hitTest(e->position().toPoint()).kind == WorkspaceSlot) {
+        // Over the switcher the wheel switches workspaces, one per notch
+        m_wheelWorkspace += d.y() != 0 ? d.y() : d.x();
+        while (qAbs(m_wheelWorkspace) >= 120) {
+            const int step = m_wheelWorkspace > 0 ? -1 : 1; // wheel up: the previous workspace
+            m_workspaces->activateRelative(step, false);
+            m_wheelWorkspace += step * 120;
+        }
+        return;
+    }
+    m_wheelWorkspace = 0;
     scrollBy(-(d.y() != 0 ? d.y() : d.x()) * slotHeight() / 120);
     m_hover = hitTest(e->position().toPoint());
     QToolTip::hideText();
@@ -247,7 +269,89 @@ QPoint LauncherView::slotCenter(int slot) const
 {
     if (slot >= 1000)
         return tileRect(DeviceSlot, slot - 1000).center();
+    if (slot == -3)
+        return tileRect(WorkspaceSlot, 0).center();
     return slot == -1 ? tileRect(DashSlot, 0).center() : slot == -2 ? tileRect(TrashSlot, 0).center() : tileRect(ItemSlot, slot).center();
+}
+
+QPoint LauncherView::workspaceCellCenter(int index) const
+{
+    const QList<QRect> cells = workspaceCells(tileRect(WorkspaceSlot, 0));
+    return index >= 0 && index < cells.size() ? cells.at(index).center() : tileRect(WorkspaceSlot, 0).center();
+}
+
+bool LauncherView::workspaceSwitcherShown() const
+{
+    // auto: only when there is more than one workspace (as in Unity, where the switcher
+    // appeared once workspaces were enabled); yes: always; no: never
+    const QString mode = launcherSetting(QStringLiteral("launcher/workspaces"), QStringLiteral("auto")).toString();
+    if (mode == QLatin1String("no") || !m_workspaces->isActive())
+        return false;
+    const int count = int(m_workspaces->workspaces().size());
+    return mode == QLatin1String("yes") ? count >= 1 : count > 1;
+}
+
+// The workspaces as a small grid inside the tile, like a pager: 2 side by side, up to 4 as 2×2,
+// up to 9 as 3×3. More than that don't fit: then the tile shows the number of the active one.
+QList<QRect> LauncherView::workspaceCells(const QRect &tile) const
+{
+    const int n = int(m_workspaces->workspaces().size());
+    if (n < 1 || n > 9)
+        return {};
+    const int cols = n <= 2 ? n : n <= 4 ? 2 : 3;
+    const int rows = (n + cols - 1) / cols;
+    const QRect inner = tile.adjusted(tile.width() / 7, tile.height() / 7, -tile.width() / 7, -tile.height() / 7);
+    const int gap = qMax(2, tile.width() / 24);
+    const int cw = (inner.width() - (cols - 1) * gap) / cols;
+    const int ch = qMin((inner.height() - (rows - 1) * gap) / rows, cols == 1 ? inner.height() : cw); // square-ish
+    const int top = inner.top() + (inner.height() - (rows * ch + (rows - 1) * gap)) / 2;
+    const int left = inner.left() + (inner.width() - (cols * cw + (cols - 1) * gap)) / 2;
+    QList<QRect> cells;
+    for (int i = 0; i < n; ++i)
+        cells << QRect(left + (i % cols) * (cw + gap), top + (i / cols) * (ch + gap), cw, ch);
+    return cells;
+}
+
+void LauncherView::drawWorkspaces(QPainter &p, const QRect &tile)
+{
+    const QList<Workspace *> all = m_workspaces->workspaces();
+    const int active = m_workspaces->activeIndex();
+    const QList<QRect> cells = workspaceCells(tile);
+    p.save();
+    QFont f = font();
+    if (cells.isEmpty()) {
+        // Too many to draw: "3/12"
+        f.setBold(true);
+        f.setPixelSize(qMax(9, tile.height() / 4));
+        p.setFont(f);
+        p.setPen(QColor(0xf2, 0xf2, 0xf4));
+        p.drawText(tile, Qt::AlignCenter, QStringLiteral("%1/%2").arg(active + 1).arg(all.size()));
+        p.restore();
+        return;
+    }
+    f.setBold(true);
+    f.setPixelSize(qMax(7, int(cells.first().height() * 0.62)));
+    p.setFont(f);
+    const bool numbers = cells.first().height() >= 11;
+    for (int i = 0; i < cells.size(); ++i) {
+        const QRectF c = QRectF(cells.at(i)).adjusted(0.5, 0.5, -0.5, -0.5);
+        const bool on = i == active;
+        const bool hover = m_hover.kind == WorkspaceSlot && m_hover.index == i && !on;
+        QPainterPath path;
+        path.addRoundedRect(c, 2.5, 2.5);
+        p.fillPath(path, on ? QColor(0xf2, 0xf2, 0xf4, 225) : QColor(255, 255, 255, hover ? 70 : 28));
+        p.setPen(QPen(QColor(255, 255, 255, on ? 0 : 90), 1));
+        p.drawPath(path);
+        if (all.value(i) && all.at(i)->isUrgent() && !on) {
+            p.setPen(QPen(QColor(0xff, 0x9a, 0x3c), 1.5));
+            p.drawPath(path);
+        }
+        if (numbers) {
+            p.setPen(on ? QColor(0x2c, 0x2d, 0x35) : QColor(0xf2, 0xf2, 0xf4, 220));
+            p.drawText(cells.at(i), Qt::AlignCenter, QString::number(i + 1));
+        }
+    }
+    p.restore();
 }
 
 QRect LauncherView::tileRect(SlotKind kind, int index) const
@@ -261,6 +365,8 @@ QRect LauncherView::tileRect(SlotKind kind, int index) const
         return QRect(x, itemsArea().top() + kSpacing / 2 + index * slotHeight() - m_scroll, t, t);
     case DeviceSlot: // after the applications, as in Unity
         return tileRect(ItemSlot, int(m_model->items().size()) + index);
+    case WorkspaceSlot: // right above the trash, as in Unity
+        return QRect(x, height() - kPadding - t - slotHeight(), t, t);
     case TrashSlot:
         return QRect(x, height() - kPadding - t, t, t);
     default:
@@ -277,6 +383,13 @@ LauncherView::Hit LauncherView::hitTest(const QPoint &pos) const
         return {DashSlot, -1};
     if (inside(tileRect(TrashSlot, 0)))
         return {TrashSlot, -1};
+    if (workspaceSwitcherShown() && inside(tileRect(WorkspaceSlot, 0))) {
+        const QList<QRect> cells = workspaceCells(tileRect(WorkspaceSlot, 0));
+        for (int i = 0; i < cells.size(); ++i)
+            if (cells.at(i).adjusted(-1, -1, 1, 1).contains(pos))
+                return {WorkspaceSlot, i};
+        return {WorkspaceSlot, -1};
+    }
     if (!itemsArea().contains(QPoint(0, pos.y())))
         return {};
     for (int i = 0; i < m_model->items().size(); ++i)
@@ -429,6 +542,12 @@ void LauncherView::paintEvent(QPaintEvent *)
     const QIcon trashIcon = QIcon::fromTheme(m_trash->isEmpty() ? QStringLiteral("user-trash") : QStringLiteral("user-trash-full"),
                                              QIcon::fromTheme(QStringLiteral("user-trash")));
     drawTile(p, tileRect(TrashSlot, 0), trashIcon, QColor(0x55, 0x56, 0x5e), m_hover.kind == TrashSlot, 1.0);
+
+    if (workspaceSwitcherShown()) {
+        const QRect r = tileRect(WorkspaceSlot, 0);
+        drawTile(p, r, QIcon(), QColor(0x3f, 0x4a, 0x5e), m_hover.kind == WorkspaceSlot && m_hover.index < 0, 1.0);
+        drawWorkspaces(p, r);
+    }
 }
 
 bool LauncherView::event(QEvent *e)
@@ -445,6 +564,13 @@ bool LauncherView::event(QEvent *e)
             tip = m_model->items().at(h.index).name();
         else if (h.kind == DeviceSlot)
             tip = m_devices->devices().at(h.index).name;
+        else if (h.kind == WorkspaceSlot) {
+            const QList<Workspace *> all = m_workspaces->workspaces();
+            if (h.index >= 0 && h.index < all.size())
+                tip = all.at(h.index)->name();
+            else
+                tip = tr("Workspace Switcher");
+        }
         if (tip.isEmpty() || !m_dragKey.isEmpty()) {
             QToolTip::hideText();
         } else {
@@ -469,6 +595,8 @@ void LauncherView::mousePressEvent(QMouseEvent *e)
             showTrashMenu();
         else if (m_pressed.kind == DeviceSlot)
             showDeviceMenu(m_pressed.index);
+        else if (m_pressed.kind == WorkspaceSlot)
+            showWorkspaceMenu();
         else if (m_pressed.kind == DashSlot)
             toggleAppMenu();
         m_pressed = {};
@@ -523,6 +651,14 @@ void LauncherView::mouseReleaseEvent(QMouseEvent *e)
     m_pressed = {};
     if (h.kind != pressed.kind || h.index != pressed.index)
         return;
+    if (e->button() == Qt::LeftButton && h.kind == WorkspaceSlot) {
+        // A workspace in the grid: go there; elsewhere on the tile (or too many to draw): the list
+        if (h.index >= 0)
+            m_workspaces->activate(h.index);
+        else
+            showWorkspaceMenu();
+        return;
+    }
     if (e->button() == Qt::LeftButton) {
         if (h.kind == DashSlot)
             toggleAppMenu();
@@ -650,6 +786,21 @@ void LauncherView::showDeviceMenu(int index)
         info->setEnabled(false);
     }
     popupMenu(menu, tileRect(DeviceSlot, index));
+}
+
+void LauncherView::showWorkspaceMenu()
+{
+    auto *menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    const QList<Workspace *> all = m_workspaces->workspaces();
+    const int active = m_workspaces->activeIndex();
+    for (int i = 0; i < all.size(); ++i) {
+        QAction *a = menu->addAction(QStringLiteral("%1   %2").arg(i + 1).arg(QString(all.at(i)->name()).replace('&', QLatin1String("&&"))));
+        a->setCheckable(true);
+        a->setChecked(i == active);
+        connect(a, &QAction::triggered, this, [this, i] { m_workspaces->activate(i); });
+    }
+    popupMenu(menu, tileRect(WorkspaceSlot, 0));
 }
 
 void LauncherView::showTrashMenu()

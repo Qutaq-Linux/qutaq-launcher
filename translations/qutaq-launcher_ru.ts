@@ -141,6 +141,10 @@
         <source>Safely Remove</source>
         <translation>Безопасно извлечь</translation>
     </message>
+    <message>
+        <source>Workspace Switcher</source>
+        <translation>Переключатель рабочих столов</translation>
+    </message>
 </context>
 <context>
     <name>Trash</name>

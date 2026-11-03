@@ -7,6 +7,7 @@
 #include "settings.h"
 #include "toplevelmanager.h"
 #include "trash.h"
+#include "workspaces.h"
 
 #include <QApplication>
 #include <QDBusConnection>
@@ -15,6 +16,9 @@
 #include <QDBusServiceWatcher>
 #include <QCursor>
 #include <QDebug>
+#include <QDir>
+#include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QHash>
 #include <QLibraryInfo>
 #include <QLocale>
@@ -145,6 +149,7 @@ int main(int argc, char *argv[])
         box->show();
     });
     AppMenu appMenu;
+    WorkspaceManager workspaces;
 
     QHash<QScreen *, LauncherView *> views;
     LauncherBus dbus(&views);
@@ -156,7 +161,7 @@ int main(int argc, char *argv[])
     auto addView = [&](QScreen *screen) {
         if (!allMonitors && screen != QGuiApplication::primaryScreen())
             return;
-        auto *v = new LauncherView(&model, &devices, &trash, &appMenu, screen);
+        auto *v = new LauncherView(&model, &devices, &trash, &appMenu, &workspaces, screen);
         v->setupLayerShell();
         v->show();
         views.insert(screen, v);
@@ -181,6 +186,23 @@ int main(int argc, char *argv[])
         for (LauncherView *v : std::as_const(views))
             v->checkPlacementSoon();
     });
+
+    // launcher.conf edited (by hand or by a settings tool): repaint, so e.g. the workspace
+    // switcher appears or disappears at once. Editors replace the file, so watch its folder too.
+    auto *confWatcher = new QFileSystemWatcher(&app);
+    const QString confFile = launcherSettings().fileName();
+    QDir().mkpath(QFileInfo(confFile).absolutePath());
+    confWatcher->addPath(QFileInfo(confFile).absolutePath());
+    if (QFileInfo::exists(confFile))
+        confWatcher->addPath(confFile);
+    auto confChanged = [&, confWatcher, confFile] {
+        if (QFileInfo::exists(confFile) && !confWatcher->files().contains(confFile))
+            confWatcher->addPath(confFile);
+        for (LauncherView *v : std::as_const(views))
+            v->update();
+    };
+    QObject::connect(confWatcher, &QFileSystemWatcher::fileChanged, &app, confChanged);
+    QObject::connect(confWatcher, &QFileSystemWatcher::directoryChanged, &app, confChanged);
 
     // qutaq-dash tells when it opens and closes: the top button is highlighted meanwhile
     auto *dashListener = new LauncherDashListener(&views, &app);
