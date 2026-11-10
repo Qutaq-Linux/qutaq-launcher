@@ -16,8 +16,8 @@ class QTimer;
 //   [▣]   ← pinned and running applications; ▸ on the left = open windows,
 //   [▣]     ◂ on the right = the active application
 //   …
-//   [💾]   ← drives and media (USB sticks, cards, discs, other partitions); ▸ = mounted
 //   [▦]   ← workspace switcher: click a workspace, or scroll (launcher/workspaces)
+//   [💾]   ← drives and media (USB sticks, cards, discs, other partitions); ▸ = mounted
 //   [🗑]   ← trash, always at the bottom
 //
 // Left click: start / switch to / cycle windows / minimize. Middle click: new instance.

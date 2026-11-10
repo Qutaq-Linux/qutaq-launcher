@@ -210,14 +210,14 @@ int LauncherView::tileSize() const
 QRect LauncherView::itemsArea() const
 {
     const int top = kPadding + slotHeight() - kSpacing / 2;
-    const int fixedBelow = workspaceSwitcherShown() ? 2 : 1; // trash, and the switcher above it
-    const int bottom = height() - kPadding - fixedBelow * slotHeight() + kSpacing / 2;
+    const int bottom = height() - kPadding - tileSize() - kSpacing / 2;
     return QRect(0, top, width(), qMax(0, bottom - top));
 }
 
 int LauncherView::maxScroll() const
 {
-    return qMax(0, int(m_model->items().size() + deviceCount()) * slotHeight() - itemsArea().height());
+    const int slotCount = int(m_model->items().size()) + (workspaceSwitcherShown() ? 1 : 0) + deviceCount();
+    return qMax(0, slotCount * slotHeight() - itemsArea().height());
 }
 
 int LauncherView::deviceCount() const
@@ -363,10 +363,10 @@ QRect LauncherView::tileRect(SlotKind kind, int index) const
         return QRect(x, kPadding, t, t);
     case ItemSlot:
         return QRect(x, itemsArea().top() + kSpacing / 2 + index * slotHeight() - m_scroll, t, t);
-    case DeviceSlot: // after the applications, as in Unity
-        return tileRect(ItemSlot, int(m_model->items().size()) + index);
-    case WorkspaceSlot: // right above the trash, as in Unity
-        return QRect(x, height() - kPadding - t - slotHeight(), t, t);
+    case WorkspaceSlot: // right after the applications, as in Unity; scrolls with them
+        return tileRect(ItemSlot, int(m_model->items().size()));
+    case DeviceSlot: // after the applications and the workspace switcher, as in Unity
+        return tileRect(ItemSlot, int(m_model->items().size()) + (workspaceSwitcherShown() ? 1 : 0) + index);
     case TrashSlot:
         return QRect(x, height() - kPadding - t, t, t);
     default:
@@ -383,6 +383,11 @@ LauncherView::Hit LauncherView::hitTest(const QPoint &pos) const
         return {DashSlot, -1};
     if (inside(tileRect(TrashSlot, 0)))
         return {TrashSlot, -1};
+    if (!itemsArea().contains(QPoint(0, pos.y())))
+        return {};
+    for (int i = 0; i < m_model->items().size(); ++i)
+        if (inside(tileRect(ItemSlot, i)))
+            return {ItemSlot, i};
     if (workspaceSwitcherShown() && inside(tileRect(WorkspaceSlot, 0))) {
         const QList<QRect> cells = workspaceCells(tileRect(WorkspaceSlot, 0));
         for (int i = 0; i < cells.size(); ++i)
@@ -390,11 +395,6 @@ LauncherView::Hit LauncherView::hitTest(const QPoint &pos) const
                 return {WorkspaceSlot, i};
         return {WorkspaceSlot, -1};
     }
-    if (!itemsArea().contains(QPoint(0, pos.y())))
-        return {};
-    for (int i = 0; i < m_model->items().size(); ++i)
-        if (inside(tileRect(ItemSlot, i)))
-            return {ItemSlot, i};
     for (int i = 0; i < deviceCount(); ++i)
         if (inside(tileRect(DeviceSlot, i)))
             return {DeviceSlot, i};
@@ -499,6 +499,12 @@ void LauncherView::paintEvent(QPaintEvent *)
         if (item.isActive())
             triangle(p, width() - 1, r.center().y(), h, false);
     }
+    // The workspace switcher, after the applications
+    if (workspaceSwitcherShown()) {
+        const QRect r = tileRect(WorkspaceSlot, 0);
+        drawTile(p, r, QIcon(), QColor(0x3f, 0x4a, 0x5e), m_hover.kind == WorkspaceSlot && m_hover.index < 0 && m_dragKey.isEmpty(), 1.0);
+        drawWorkspaces(p, r);
+    }
     // Drives and media: a pip on the left while mounted
     const QList<Device> devices = m_devices->devices();
     for (int i = 0; i < devices.size(); ++i) {
@@ -542,12 +548,6 @@ void LauncherView::paintEvent(QPaintEvent *)
     const QIcon trashIcon = QIcon::fromTheme(m_trash->isEmpty() ? QStringLiteral("user-trash") : QStringLiteral("user-trash-full"),
                                              QIcon::fromTheme(QStringLiteral("user-trash")));
     drawTile(p, tileRect(TrashSlot, 0), trashIcon, QColor(0x55, 0x56, 0x5e), m_hover.kind == TrashSlot, 1.0);
-
-    if (workspaceSwitcherShown()) {
-        const QRect r = tileRect(WorkspaceSlot, 0);
-        drawTile(p, r, QIcon(), QColor(0x3f, 0x4a, 0x5e), m_hover.kind == WorkspaceSlot && m_hover.index < 0, 1.0);
-        drawWorkspaces(p, r);
-    }
 }
 
 bool LauncherView::event(QEvent *e)
